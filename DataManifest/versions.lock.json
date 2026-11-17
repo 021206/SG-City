@@ -1,0 +1,10 @@
+{
+  "unrealEngine": "5.8",
+  "cesiumForUnreal": "2.31.0",
+  "cesiumPluginPackage": "CesiumForUnreal-58-v2.31.0.zip",
+  "node": "22.22.2",
+  "dataPipeline": "0.1.0",
+  "targetPlatform": "Win64",
+  "targetRhi": "DX12",
+  "status": "source-scaffold; Unreal Engine not installed on this machine"
+}

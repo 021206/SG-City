@@ -1,0 +1,14 @@
+{
+  "name": "sg-city",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Singapore offline 3D city data pipeline and Unreal Engine project",
+  "scripts": {
+    "data:p0": "node Tools/data_pipeline/build_p0.mjs",
+    "validate:data": "node Tools/validation/validate_tiles.mjs",
+    "preview:p0": "node Tools/validation/render_preview.mjs",
+    "viewer": "node WebViewer/server.mjs",
+    "test": "node --test Tools/validation/*.test.mjs"
+  }
+}

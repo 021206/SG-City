@@ -1,0 +1,36 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.8",
+  "Category": "Geospatial",
+  "Description": "Singapore offline 3D city map powered by Unreal Engine and Cesium for Unreal.",
+  "Modules": [
+    {
+      "Name": "SGCity",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "AdditionalDependencies": [
+        "Engine",
+        "CesiumRuntime",
+        "UMG"
+      ]
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "CesiumForUnreal",
+      "Enabled": true
+    },
+    {
+      "Name": "EnhancedInput",
+      "Enabled": true
+    },
+    {
+      "Name": "PythonScriptPlugin",
+      "Enabled": true
+    },
+    {
+      "Name": "EditorScriptingUtilities",
+      "Enabled": true
+    }
+  ]
+}

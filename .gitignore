@@ -1,0 +1,40 @@
+# Unreal build outputs
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.vscode/
+.idea/
+*.sln
+*.opensdf
+*.sdf
+*.suo
+*.user
+
+# Third-party UE plugins (install separately, e.g. Cesium for Unreal ~6.8GB)
+Plugins/
+
+# Local tools and dependencies
+.tools/
+node_modules/
+
+# Large and reproducible data
+LocalData/
+
+# Local agent state
+.workbuddy/
+.work/
+.screenshots/
+.qoder-input-images/
+.trae-html-share-packages/
+
+# Local caches / databases
+*.sqlite
+*.sqlite-journal
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db

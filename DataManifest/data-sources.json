@@ -1,0 +1,26 @@
+{
+  "snapshotDate": "2026-11-02",
+  "sources": [
+    {
+      "id": "osm-overpass",
+      "purpose": "Marina Bay buildings, roads, water and points of interest",
+      "url": "https://overpass-api.de/api/interpreter",
+      "license": "ODbL-1.0",
+      "attribution": "© OpenStreetMap contributors",
+      "licenseUrl": "https://www.openstreetmap.org/copyright"
+    },
+    {
+      "id": "mapzen-terrain-tiles",
+      "purpose": "P0 display-grade terrain sampling",
+      "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+      "license": "See underlying source attributions",
+      "attribution": "Terrain Tiles by Mapzen/Tilezen; SRTM and other sources per Joerd attribution",
+      "licenseUrl": "https://github.com/tilezen/joerd/blob/master/docs/attribution.md"
+    }
+  ],
+  "limitations": [
+    "P0 building heights are estimated when OSM height and building:levels are absent.",
+    "P0 terrain is display-grade and must not be used for surveying or navigation.",
+    "Building relations and complex shoreline relations require full-city pipeline hardening."
+  ]
+}
