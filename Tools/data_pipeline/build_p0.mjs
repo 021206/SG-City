@@ -16,6 +16,7 @@ import {
   stitchRings
 } from './geo.mjs';
 import { MeshBuilder } from './gltf.mjs';
+import { loadLtaRoadSectionLines } from './lta-roads.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const RAW = resolve(ROOT, 'LocalData/raw');
@@ -23,14 +24,24 @@ const OUTPUT = resolve(ROOT, 'LocalData/SGCityData');
 const OFFLINE = process.argv.includes('--offline');
 const BBOX = { south: 1.242, west: 103.795, north: 1.335, east: 103.950 };
 const ORIGIN = { longitude: 103.8725, latitude: 1.2885, height: 0 };
-const DATA_VERSION = 'p0.3';
+const DATA_VERSION = 'p0.8';
+const PROPOSAL_CONNECTIONS = [{
+  id: 'rhu-cross-bay-east-review',
+  name: 'Rhu Cross 方案连接（待核实）',
+  status: 'scheme_placeholder_not_existing_road',
+  note: 'User-approved scheme connector; no LTA kerb evidence along this approximately 55 m gap. Not an existing road or surveyed alignment.',
+  coordinates: [
+    [103.87303653642826, 1.2852588640073963],
+    [103.8728607, 1.2848421],
+  ],
+}];
 const TERRAIN_ZOOM = 13;
+const BUILDING_HEIGHT_SCALE = 0.55;
 const geo = createGeoContext(ORIGIN);
 
-/* Hill / park greens: four deterministic shades so neighbouring hill parcels
-   read as distinct plots. Flat urban parcels use PARCEL_SHADES (dark, close to
-   water luminance but neutral) so hills stay green while built-up land reads
-   dark and water reads blue — three clearly separable surface families. */
+/* Green is reserved for hills / steep vegetated terrain. Ordinary urban parcels
+   use neutral dark slate shades, close to water in luminance but without its
+   blue hue, so flat high-elevation districts are not mistaken for hills. */
 const BLOCK_SHADES = [
   [0.020, 0.090, 0.038, 1],
   [0.032, 0.135, 0.052, 1],
@@ -38,15 +49,15 @@ const BLOCK_SHADES = [
   [0.026, 0.110, 0.045, 1]
 ];
 const PARCEL_SHADES = [
-  [0.008, 0.020, 0.016, 1],
-  [0.010, 0.026, 0.020, 1],
-  [0.012, 0.032, 0.024, 1],
-  [0.009, 0.023, 0.018, 1]
+  [0.018, 0.022, 0.027, 1],
+  [0.023, 0.028, 0.034, 1],
+  [0.029, 0.035, 0.042, 1],
+  [0.021, 0.026, 0.031, 1]
 ];
 
 const MATERIALS = {
   ground: { baseColor: [0.020, 0.085, 0.036, 1], roughness: 0.96 },
-  groundFlat: { baseColor: [0.008, 0.022, 0.017, 1], roughness: 0.96 },
+  groundFlat: { baseColor: [0.014, 0.019, 0.024, 1], roughness: 0.96 },
   block0: { baseColor: BLOCK_SHADES[0], roughness: 0.95 },
   block1: { baseColor: BLOCK_SHADES[1], roughness: 0.95 },
   block2: { baseColor: BLOCK_SHADES[2], roughness: 0.95 },
@@ -61,7 +72,9 @@ const MATERIALS = {
   roadMinor: { baseColor: [0.058, 0.12, 0.22, 1], emissive: [0.004, 0.014, 0.028], roughness: 0.8, doubleSided: true },
   roadTunnel: { baseColor: [0.030, 0.060, 0.110, 1], emissive: [0.003, 0.008, 0.016], roughness: 0.8, doubleSided: true },
   roadCasing: { baseColor: [0.20, 0.33, 0.50, 1], emissive: [0.010, 0.022, 0.040], roughness: 0.85, doubleSided: true },
+  roadMajorCasing: { baseColor: [0.20, 0.33, 0.50, 1], emissive: [0.010, 0.022, 0.040], roughness: 0.85, doubleSided: true },
   roadMarking: { baseColor: [0.78, 0.80, 0.82, 1], emissive: [0.05, 0.055, 0.06], roughness: 0.6, doubleSided: true },
+  roadProposed: { baseColor: [0.95, 0.32, 0.035, 1], emissive: [0.35, 0.08, 0.005], roughness: 0.65, doubleSided: true },
   roof: { baseColor: [0.012, 0.032, 0.045, 1], roughness: 0.82 },
   facade: { baseColor: [0.018, 0.065, 0.075, 1], metallic: 0.15, roughness: 0.42 },
   windowCyan: { baseColor: [0.01, 0.22, 0.16, 1], emissive: [0.08, 0.90, 0.62], emissiveStrength: 3.5, roughness: 0.5, doubleSided: true },
@@ -214,6 +227,7 @@ function indexOsm(data) {
 }
 
 function wayCoordinates(way, nodes) {
+  if (way.coordinates) return way.coordinates;
   if (!way.nodes) return [];
   return way.nodes.map((id) => {
     const node = nodes.get(id);
@@ -531,6 +545,186 @@ function isVehicleRoad(tags) {
   return Boolean(tags.highway) && tags.area !== 'yes' && VEHICLE_HIGHWAYS.has(tags.highway);
 }
 
+/* Keep the complete road network for engineering context. Access and
+   construction attributes affect interpretation, not geometric visibility:
+   filtering them can disconnect otherwise continuous routes. */
+function isDisplayRoad(tags) {
+  return isVehicleRoad(tags);
+}
+
+function pointSegmentDistance(point, a, b) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const lengthSq = dx * dx + dy * dy;
+  const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1,
+    ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / lengthSq));
+  return Math.hypot(point[0] - a[0] - t * dx, point[1] - a[1] - t * dy);
+}
+
+/* Match LTA geometry to nearby OSM attributes in local metres. The official
+   2026 SHP has road codes/categories but no names, so matching is spatial;
+   distances are reported instead of presenting all attributes as surveyed. */
+function mergeLtaRoads(osmRoads, nodes, lta) {
+  const streetWays = osmRoads.filter((way) => isVehicleRoad(way.tags ?? {}));
+  const cellSize = 150;
+  const grid = new Map();
+  const byWay = new Map();
+  const key = (x, y) => `${x},${y}`;
+  for (const way of streetWays) {
+    const coordinates = wayCoordinates(way, nodes);
+    const local = coordinates.map((coord) => geo.project(coord[1], coord[2], 0));
+    const record = { way, local, segments: [] };
+    byWay.set(way.id, record);
+    for (let index = 0; index + 1 < local.length; index += 1) {
+      const a = local[index];
+      const b = local[index + 1];
+      const segment = { a, b, wayId: way.id };
+      record.segments.push(segment);
+      const minX = Math.floor(Math.min(a[0], b[0]) / cellSize);
+      const maxX = Math.floor(Math.max(a[0], b[0]) / cellSize);
+      const minY = Math.floor(Math.min(a[1], b[1]) / cellSize);
+      const maxY = Math.floor(Math.max(a[1], b[1]) / cellSize);
+      for (let x = minX; x <= maxX; x += 1) {
+        for (let y = minY; y <= maxY; y += 1) {
+          const k = key(x, y);
+          if (!grid.has(k)) grid.set(k, []);
+          grid.get(k).push(segment);
+        }
+      }
+    }
+  }
+
+  function candidates(point, radius) {
+    const found = new Map();
+    const minX = Math.floor((point[0] - radius) / cellSize);
+    const maxX = Math.floor((point[0] + radius) / cellSize);
+    const minY = Math.floor((point[1] - radius) / cellSize);
+    const maxY = Math.floor((point[1] + radius) / cellSize);
+    for (let x = minX; x <= maxX; x += 1) {
+      for (let y = minY; y <= maxY; y += 1) {
+        for (const segment of grid.get(key(x, y)) ?? []) {
+          if (!found.has(segment.wayId)) found.set(segment.wayId, byWay.get(segment.wayId));
+        }
+      }
+    }
+    return [...found.values()];
+  }
+
+  function scoreCandidate(record, samples) {
+    let total = 0;
+    let maximum = 0;
+    for (const sample of samples) {
+      let minimum = Infinity;
+      for (const segment of record.segments) {
+        minimum = Math.min(minimum, pointSegmentDistance(sample, segment.a, segment.b));
+      }
+      total += minimum;
+      maximum = Math.max(maximum, minimum);
+    }
+    return { mean: total / samples.length, maximum };
+  }
+
+  const matchedOsm = new Set();
+  const distances = [];
+  const categoryMatches = {};
+  let unmatched = 0;
+  const official = [];
+  for (const way of lta.ways) {
+    const coordinates = wayCoordinates(way, nodes);
+    const local = coordinates.map((coord) => geo.project(coord[1], coord[2], 0));
+    const sampleIndexes = [...new Set([0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(t * (local.length - 1))))];
+    const samples = sampleIndexes.map((index) => local[index]);
+    const candidateMap = new Map();
+    for (const sample of samples) {
+      for (const record of candidates(sample, 120)) candidateMap.set(record.way.id, record);
+    }
+    let best = null;
+    for (const record of candidateMap.values()) {
+      const score = scoreCandidate(record, samples);
+      if (!best || score.mean < best.mean) best = { record, ...score };
+    }
+    const category = way.tags['lta:category'];
+    const matched = best && best.mean <= 40 && best.maximum <= 120;
+    const osmTags = matched ? best.record.way.tags ?? {} : {};
+    const fallbackHighway = {
+      CAT1: 'motorway', CAT2: 'trunk', CAT3: 'primary',
+      CAT4: 'tertiary', CAT5: 'residential', NCAT: 'unclassified',
+    }[category] ?? 'unclassified';
+    if (matched) {
+      matchedOsm.add(best.record.way.id);
+      distances.push(best.mean);
+      if (!categoryMatches[category]) categoryMatches[category] = {};
+      const highway = osmTags.highway ?? 'unknown';
+      categoryMatches[category][highway] = (categoryMatches[category][highway] ?? 0) + 1;
+    } else {
+      unmatched += 1;
+    }
+    official.push({
+      ...way,
+      tags: {
+        ...osmTags,
+        ...way.tags,
+        highway: osmTags.highway ?? fallbackHighway,
+        source: 'lta-road-section-line',
+        ...(matched ? { 'match:distance': best.mean.toFixed(2) } : { 'match:status': 'unmatched' }),
+      },
+    });
+  }
+
+  /* The 2026 LTA extract omits names on some records. Recover a name only
+     when all named records with the SAME official road code agree; never
+     invent a connection or borrow a name from a merely nearby street. */
+  const namesByCode = new Map();
+  for (const way of official) {
+    const code = way.tags['lta:road_code'];
+    const name = way.tags.name;
+    if (!code || !name || way.tags.access === 'private' || way.tags.construction) continue;
+    if (!namesByCode.has(code)) namesByCode.set(code, []);
+    namesByCode.get(code).push(way);
+  }
+  let topologyNamed = 0;
+  for (const way of official) {
+    if (way.tags.name) continue;
+    const candidates = namesByCode.get(way.tags['lta:road_code']) ?? [];
+    const names = [...new Set(candidates.map((candidate) => candidate.tags.name))];
+    if (names.length !== 1) continue;
+    const reference = candidates[0];
+    const minorPair = roadClass(way.tags) === 'roadMinor' && roadClass(reference.tags) === 'roadMinor';
+    way.tags = {
+      ...way.tags,
+      name: names[0],
+      ...(minorPair ? {
+        highway: reference.tags.highway,
+        lanes: reference.tags.lanes,
+        width: reference.tags.width,
+      } : {}),
+      'name:source': 'lta-shared-road-code',
+    };
+    topologyNamed += 1;
+  }
+
+  const supplemental = streetWays.filter((way) => !matchedOsm.has(way.id)).map((way) => ({
+    ...way,
+    tags: { ...(way.tags ?? {}), source: 'osm-overpass' },
+  }));
+  distances.sort((a, b) => a - b);
+  const meanDistance = distances.length ? distances.reduce((sum, value) => sum + value, 0) / distances.length : null;
+  const p95Distance = distances.length ? distances[Math.min(distances.length - 1, Math.floor(distances.length * 0.95))] : null;
+  return {
+    roads: [...official, ...supplemental],
+    stats: {
+      ltaOfficialWays: official.length,
+      ltaMatchedWays: distances.length,
+      ltaUnmatchedWays: unmatched,
+      ltaTopologyNamedWays: topologyNamed,
+      osmSupplementWays: supplemental.length,
+      ltaMatchMeanDistanceM: meanDistance === null ? null : Number(meanDistance.toFixed(2)),
+      ltaMatchP95DistanceM: p95Distance === null ? null : Number(p95Distance.toFixed(2)),
+      ltaCategoryMatches: categoryMatches,
+    },
+  };
+}
+
 /* Clip an open polyline ([id,lon,lat] triplets) to the bbox, returning
    continuous runs so ribbons stay unbroken inside the map area. */
 function clipPolylineToBbox(coords, bbox) {
@@ -614,10 +808,11 @@ function emitCap(mesh, field, center, radius, lift, material) {
 }
 
 /* Dashed centre line along the polyline arc length (all street classes). */
-function emitCenterDashes(mesh, field, points, lift, minor) {
-  const dash = minor ? 3 : 4;
-  const gap = minor ? 12 : 6;
-  const halfW = minor ? 0.22 : 0.28;
+function emitCenterDashes(mesh, field, points, lift, minor, options = {}) {
+  const dash = options.dash ?? (minor ? 3 : 4);
+  const gap = options.gap ?? (minor ? 12 : 6);
+  const halfW = options.halfWidth ?? (minor ? 0.22 : 0.28);
+  const material = options.material ?? 'roadMarking';
   let dist = 0;
   let nextDash = 4;
   for (let i = 0; i < points.length - 1; i += 1) {
@@ -643,7 +838,7 @@ function emitCenterDashes(mesh, field, points, lift, minor) {
         [ex + ox, ey + oy, lb],
         [ex - ox, ey - oy, lb],
         [sx - ox, sy - oy, la]
-      ], lift, 'roadMarking');
+      ], lift, material);
       nextDash += dash + gap;
     }
     dist += segLen;
@@ -657,15 +852,17 @@ async function buildRoads(ways, nodes, field) {
     roadMinor: MATERIALS.roadMinor,
     roadTunnel: MATERIALS.roadTunnel,
     roadCasing: MATERIALS.roadCasing,
+    roadMajorCasing: MATERIALS.roadMajorCasing,
     roadMarking: MATERIALS.roadMarking
   });
-  const streetWays = ways.filter((way) => isVehicleRoad(way.tags ?? {}));
+  const streetWays = ways.filter((way) => isDisplayRoad(way.tags ?? {}));
 
   /* Node occurrence count across all street ways: >=2 means a junction where
      ribbons from different ways meet and need a sealing cap. */
   const nodeUse = new Map();
   for (const way of streetWays) {
-    for (const id of way.nodes ?? []) {
+    for (const coordinate of wayCoordinates(way, nodes)) {
+      const id = coordinate[0];
       nodeUse.set(id, (nodeUse.get(id) ?? 0) + 1);
     }
   }
@@ -683,7 +880,10 @@ async function buildRoads(ways, nodes, field) {
   const nodeLift = new Map();
   for (const way of streetWays) {
     const bl = baseLiftOf(way.tags ?? {});
-    for (const id of way.nodes ?? []) nodeLift.set(id, Math.max(nodeLift.get(id) ?? 0, bl));
+    for (const coordinate of wayCoordinates(way, nodes)) {
+      const id = coordinate[0];
+      nodeLift.set(id, Math.max(nodeLift.get(id) ?? 0, bl));
+    }
   }
 
   let segments = 0;
@@ -694,6 +894,8 @@ async function buildRoads(ways, nodes, field) {
     if (coordinates.length < 2) continue;
     const underground = (tags.tunnel && tags.tunnel !== 'no') || (Number.parseFloat(tags.layer) || 0) < 0;
     const material = underground ? 'roadTunnel' : roadClass(tags);
+    const casingMaterial = material === 'roadMajor' ? 'roadMajorCasing' : 'roadCasing';
+    const casingExtra = material === 'roadMajor' ? 1.0 : CASING_EXTRA;
     const halfWidth = roadWidth(tags) / 2;
     const runs = clipPolylineToBbox(coordinates, BBOX);
     for (const run of runs) {
@@ -702,7 +904,7 @@ async function buildRoads(ways, nodes, field) {
         const p = geo.project(coord[1], coord[2], 0);
         return [p[0], p[1], nodeLift.get(coord[0]) ?? baseLiftOf(tags)];
       });
-      emitRibbon(mesh, field, points, halfWidth + CASING_EXTRA, CASING_LIFT, 'roadCasing');
+      emitRibbon(mesh, field, points, halfWidth + casingExtra, CASING_LIFT, casingMaterial);
       emitRibbon(mesh, field, points, halfWidth, ROAD_LIFT, material);
       emitCenterDashes(mesh, field, points, ROAD_LIFT + 0.06, material === 'roadMinor');
       segments += points.length - 1;
@@ -714,13 +916,32 @@ async function buildRoads(ways, nodes, field) {
       if (end[1] < BBOX.west || end[1] > BBOX.east || end[2] < BBOX.south || end[2] > BBOX.north) continue;
       const p = geo.project(end[1], end[2], 0);
       const endLift = nodeLift.get(id) ?? baseLiftOf(tags);
-      emitCap(mesh, field, [p[0], p[1]], halfWidth + CASING_EXTRA, CASING_LIFT + endLift, 'roadCasing');
+      emitCap(mesh, field, [p[0], p[1]], halfWidth + casingExtra, CASING_LIFT + endLift, casingMaterial);
       emitCap(mesh, field, [p[0], p[1]], halfWidth, ROAD_LIFT + endLift, material);
       caps += 1;
     }
   }
   const result = await mesh.writeGlb(resolve(OUTPUT, 'roads/content.glb'));
   return { ...result, segments, caps, streetWays: streetWays.length };
+}
+
+/* User-approved scheme placeholders, deliberately separate from existing roads. */
+async function buildProposalConnections(field) {
+  const mesh = new MeshBuilder({ roadProposed: MATERIALS.roadProposed });
+  let segments = 0;
+  for (const connection of PROPOSAL_CONNECTIONS) {
+    const points = connection.coordinates.map(([longitude, latitude]) => {
+      const p = geo.project(longitude, latitude, 0);
+      return [p[0], p[1], 0];
+    });
+    emitCenterDashes(mesh, field, points, 0.70, false, {
+      dash: 7, gap: 4, halfWidth: 2.5, material: 'roadProposed',
+    });
+    segments += 1;
+  }
+  const result = await mesh.writeGlb(resolve(OUTPUT, 'proposals/content.glb'));
+  await writeJson(resolve(OUTPUT, 'proposal-connections.json'), PROPOSAL_CONNECTIONS);
+  return { ...result, connections: segments };
 }
 
 /* ---------- land blocks: faces of the at-grade road graph ---------- */
@@ -845,18 +1066,21 @@ function buildBlocks(ways, nodes, terrain, waterFeatures) {
     if (inWater) { skippedWater += 1; continue; }
 
     /* Draped fill: clipped against the terrain grid at emit time so the parcel
-       top follows the ground instead of floating as a flat slab on slopes. */
-    /* Hills / parks stay green; flat built-up parcels go dark (near-water
-       luminance, neutral hue) so land vs water vs hill are separable. */
+       top follows the ground instead of floating as a flat slab on slopes.
+       Classify hills by local relief, not absolute altitude: otherwise flat
+       urban districts above 18 m are incorrectly painted green. */
     const mLon = 111320 * Math.cos(ORIGIN.latitude * Math.PI / 180);
     const hillAt = (x, y) => {
       const lon = ORIGIN.longitude + x / mLon;
       const lat = ORIGIN.latitude - y / 110574;
       const h = terrain.sample(lon, lat);
       const e = terrain.sample(lon + 0.002, lat);
+      const w = terrain.sample(lon - 0.002, lat);
       const n = terrain.sample(lon, lat + 0.002);
-      const slope = Math.max(Math.abs(e - h), Math.abs(n - h)) / (0.002 * mLon);
-      return h > 18 || slope > 0.10;
+      const s = terrain.sample(lon, lat - 0.002);
+      const relief = Math.max(Math.abs(e - h), Math.abs(w - h), Math.abs(n - h), Math.abs(s - h));
+      const slope = relief / (0.002 * mLon);
+      return slope > 0.10 || (h > 45 && slope > 0.035);
     };
     const lift = BLOCK_LIFT + Math.min(0.12, 6 / Math.sqrt(area));
     const hill = hillAt(cx, cy);
@@ -934,7 +1158,7 @@ async function buildTerrain(field, blocks) {
       const avg = (a.elevation + b.elevation + c.elevation + d.elevation) / 4;
       const range = Math.max(...elevs) - Math.min(...elevs);
       const material = elevs.every((e) => e <= 0.05) ? 'water'
-        : (avg > 18 || range > 6 ? 'ground' : 'groundFlat');
+        : (range > 8 || (avg > 45 && range > 3) ? 'ground' : 'groundFlat');
       mesh.addTriangle([a.point, c.point, b.point], material, [0, 1, 0]);
       mesh.addTriangle([a.point, d.point, c.point], material, [0, 1, 0]);
     }
@@ -1067,7 +1291,8 @@ async function buildBuildings(features, field) {
       stats.skippedTiny += 1;
       continue;
     }
-    const height = inferHeight(feature, area, stats);
+    const sourceHeight = inferHeight(feature, area, stats);
+    const height = Math.max(1.5, sourceHeight * BUILDING_HEIGHT_SCALE);
     const top = base + height;
     const flat = projected.flatMap((point) => [point[0], point[1]]);
     const triangles = safeTriangulate(flat);
@@ -1129,7 +1354,7 @@ async function buildBuildings(features, field) {
       }
     }
     stats.buildings += 1;
-    heightRecords.push({ id: feature.id, name: feature.tags.name ?? null, height, base, area, heightSource: feature.tags.height ? 'osm_height' : feature.tags['building:levels'] ? 'osm_levels' : 'deterministic_estimate' });
+    heightRecords.push({ id: feature.id, name: feature.tags.name ?? null, height, sourceHeight, displayScale: BUILDING_HEIGHT_SCALE, base, area, heightSource: feature.tags.height ? 'osm_height' : feature.tags['building:levels'] ? 'osm_levels' : 'deterministic_estimate' });
   }
   const result = await mesh.writeGlb(resolve(OUTPUT, 'buildings/content.glb'));
   await writeJson(resolve(OUTPUT, 'building-heights.json'), heightRecords);
@@ -1178,7 +1403,7 @@ function buildRoadNames(ways, nodes) {
   const groups = new Map();
   for (const way of ways) {
     const tags = way.tags ?? {};
-    if (!isVehicleRoad(tags)) continue;
+    if (!isDisplayRoad(tags)) continue;
     const name = tags.name || tags['name:en'] || tags.ref;
     if (!name) continue;
     const coordinates = wayCoordinates(way, nodes);
@@ -1300,20 +1525,27 @@ async function main() {
   const rawWater = collectClosedPolygons(index, (tags) => tags.natural === 'water' || tags.landuse === 'reservoir' || tags.waterway === 'riverbank', 'water', relationStats);
   const buildings = rawBuildings.map(clipPolygonFeature).filter(Boolean);
   const water = rawWater.map(clipPolygonFeature).filter(Boolean);
-  const roads = [...index.ways.values()].filter((way) => way.tags?.highway);
+  const osmRoads = [...index.ways.values()].filter((way) => way.tags?.highway);
+  const lta = await loadLtaRoadSectionLines(resolve(RAW, 'lta/RoadSectionLine_Sep2026'), BBOX);
+  const mergedRoads = lta
+    ? mergeLtaRoads(osmRoads, index.nodes, lta)
+    : { roads: osmRoads, stats: { ltaOfficialWays: 0, ltaMatchedWays: 0, ltaUnmatchedWays: 0, osmSupplementWays: osmRoads.length } };
+  const roads = mergedRoads.roads;
   const railColours = buildRailColours(index);
   const rails = [...index.ways.values()].filter((way) => way.tags?.railway);
 
   console.log(`[SG-City] Buildings: ${buildings.length}; roads: ${roads.length}; rail ways: ${rails.length}; water polygons: ${water.length}`);
-  console.log('[SG-City] Extracting land blocks from road graph...');
-  const blockResult = buildBlocks(roads, index.nodes, terrain, water);
+  if (lta) console.log(`[SG-City] LTA geometry: ${mergedRoads.stats.ltaOfficialWays} ways; matched attributes: ${mergedRoads.stats.ltaMatchedWays}; OSM supplements: ${mergedRoads.stats.osmSupplementWays}`);
+  console.log('[SG-City] Extracting land blocks from OSM road graph (kept stable for parcels)...');
+  const blockResult = buildBlocks(osmRoads, index.nodes, terrain, water);
   console.log(`[SG-City] Blocks: ${blockResult.blocks.length} of ${blockResult.faces} faces (small:${blockResult.skippedSmall} water:${blockResult.skippedWater} tri:${blockResult.skippedTriangulation})`);
   const terrainResult = await buildTerrain(field, blockResult.blocks);
   const waterResult = await buildWater(water, field);
   const roadsResult = await buildRoads(roads, index.nodes, field);
+  const proposalResult = await buildProposalConnections(field);
   const railResult = await buildRail(rails, index.nodes, railColours, field);
   const buildingsResult = await buildBuildings(buildings, field);
-  for (const layer of ['terrain', 'water', 'roads', 'rail', 'buildings']) await writeTileset(layer);
+  for (const layer of ['terrain', 'water', 'roads', 'proposals', 'rail', 'buildings']) await writeTileset(layer);
   const namedRoads = buildRoadNames(roads, index.nodes);
   await writeJson(resolve(OUTPUT, 'road-names.json'), namedRoads);
   console.log(`[SG-City] Named roads: ${namedRoads.length}`);
@@ -1328,14 +1560,27 @@ async function main() {
     offline: true,
     origin: ORIGIN,
     bbox: BBOX,
-    crs: { geographic: 'EPSG:4326', rendering: 'WGS84 ECEF with local ENU tile transforms' },
+    crs: { geographic: 'EPSG:4326', officialRoadInput: 'EPSG:3414 SVY21', rendering: 'WGS84 ECEF with local ENU tile transforms' },
     verticalDatum: 'Mapzen source elevation; display-grade P0, not survey-grade',
-    layers: ['terrain', 'water', 'roads', 'rail', 'buildings'].map((id) => ({ id, entry: `${id}/tileset.json`, visible: true })),
-    sources: ['osm-overpass', 'mapzen-terrain-tiles'],
+    buildingHeightDisplayScale: BUILDING_HEIGHT_SCALE,
+    roadGeometry: lta ? {
+      source: 'LTA Road Section Line Sep2026',
+      role: 'Official horizontal road geometry; OSM supplies supplementary roads and nearest-match attributes',
+      displayFilter: 'Complete road network; no access or construction filtering',
+      ...mergedRoads.stats,
+    } : { source: 'OpenStreetMap only', role: 'LTA input unavailable' },
+    layers: ['terrain', 'water', 'roads', 'proposals', 'rail', 'buildings'].map((id) => ({ id, entry: `${id}/tileset.json`, visible: true })),
+    sources: lta ? ['lta-road-section-line', 'osm-overpass', 'mapzen-terrain-tiles'] : ['osm-overpass', 'mapzen-terrain-tiles'],
     limitations: [
+      'Scheme-comparison base only; not survey-controlled and not for setting out, construction or acceptance.',
+      'LTA supplies horizontal road geometry; names, widths and bridge/tunnel attributes are nearest-match OSM estimates unless separately surveyed.',
+      'The complete road network is shown to preserve connectivity; private and construction attributes require engineering interpretation.',
+      'The Rhu Cross A-B dashed orange connector is a user-approved scheme placeholder, not an existing road or surveyed alignment.',
       'Single-resolution P0 tiles; hierarchical LOD is a full-city pipeline task.',
       'Building heights without OSM height or levels are deterministic estimates.',
-      'Bridge heights are display approximations, not engineering elevations.',
+      `All building heights are multiplied by ${BUILDING_HEIGHT_SCALE} for display; sourceHeight retains the unscaled value.`,
+      'Bridge heights and terrain are display approximations, not engineering elevations.',
+      'Land blocks are generated visual faces, not cadastral parcels.',
       'Complex inner rings, 3D Tiles feature metadata and hand-authored landmarks are not yet implemented.'
     ]
   };
@@ -1343,10 +1588,23 @@ async function main() {
   const quality = {
     dataVersion: DATA_VERSION,
     rawOsm: { bytes: rawBytes, sha256: rawSha256, elements: osm.elements.length },
+    rawLta: lta ? {
+      dataset: 'LTA Road Section Line Sep2026',
+      sourceCrs: 'EPSG:3414 SVY21',
+      records: lta.records,
+      bytes: lta.bytes,
+      shpSha256: lta.shpSha256,
+      dbfSha256: lta.dbfSha256,
+    } : null,
     terrainTiles: terrain.provenance,
     counts: {
       buildingFeatures: buildings.length,
       roadWays: roads.length,
+      displayRoadWays: roadsResult.streetWays,
+      filteredNonPublicRoadWays: roads.length - roadsResult.streetWays,
+      proposalConnections: proposalResult.connections,
+      osmRoadWays: osmRoads.length,
+      ...mergedRoads.stats,
       railWays: rails.length,
       waterFeatures: water.length,
       searchEntries: search.length,
@@ -1354,20 +1612,20 @@ async function main() {
       namedRoads: namedRoads.length,
       ...relationStats
     },
-    meshes: { terrain: terrainResult, water: waterResult, roads: roadsResult, rail: railResult, buildings: buildingsResult },
+    meshes: { terrain: terrainResult, water: waterResult, roads: roadsResult, proposals: proposalResult, rail: railResult, buildings: buildingsResult },
     checks: {
       externalRuntimeUrls: 0,
       localLayerCount: manifest.layers.length,
-      generatedGlbFiles: 5,
+      generatedGlbFiles: 6,
       requiresUnrealVisualValidation: true
     }
   };
   await writeJson(resolve(OUTPUT, 'quality-report.json'), quality);
-  const attribution = `SG-City P0 data attribution\n\nMap data © OpenStreetMap contributors, ODbL 1.0\nhttps://www.openstreetmap.org/copyright\n\nTerrain Tiles was accessed on 2026-11-02 from https://registry.opendata.aws/terrain-tiles.\nTerrain Tiles by Mapzen/Tilezen. Underlying source attributions:\nhttps://github.com/tilezen/joerd/blob/master/docs/attribution.md\nSRTM terrain data courtesy of the U.S. Geological Survey where applicable.\n\nThis P0 is a display-grade stylized map. Estimated building heights and bridge elevations are not authoritative.\n`;
+  const attribution = `SG-City P0 data attribution\n\nRoad geometry: Land Transport Authority, Road Section Line (Sep 2026), SVY21 / EPSG:3414.\nSource: https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/RoadSectionLine_Sep2026.zip\nSingapore Open Data Licence: https://data.gov.sg/open-data-licence\nLTA geometry is converted to WGS84 without visual shifting. Road names, widths and bridge/tunnel attributes are supplemented from nearby OSM ways and are not surveyed attributes.\nThe complete road network is shown to preserve connectivity; private and construction attributes require engineering interpretation.\n\nSupplementary roads, buildings, water and place names: Map data © OpenStreetMap contributors, ODbL 1.0\nhttps://www.openstreetmap.org/copyright\n\nTerrain Tiles was accessed on 2026-11-02 from https://registry.opendata.aws/terrain-tiles.\nTerrain Tiles by Mapzen/Tilezen. Underlying source attributions:\nhttps://github.com/tilezen/joerd/blob/master/docs/attribution.md\nSRTM terrain data courtesy of the U.S. Geological Survey where applicable.\n\nThe Rhu Cross A-B dashed orange connector is a user-approved scheme placeholder without LTA kerb evidence. It is not an existing road or surveyed alignment.\n\nThis dataset supports scheme comparison and spatial coordination only. It is not survey-controlled and must not be used for construction setting out or acceptance. Estimated building heights, road widths and bridge elevations are not authoritative.\n`;
   await writeFile(resolve(OUTPUT, 'ATTRIBUTION.txt'), attribution, 'utf8');
 
-  const checksumFiles = ['manifest.json', 'search.json', 'road-names.json', 'building-heights.json', 'quality-report.json', 'ATTRIBUTION.txt'];
-  for (const layer of ['terrain', 'water', 'roads', 'rail', 'buildings']) {
+  const checksumFiles = ['manifest.json', 'search.json', 'road-names.json', 'proposal-connections.json', 'building-heights.json', 'quality-report.json', 'ATTRIBUTION.txt'];
+  for (const layer of ['terrain', 'water', 'roads', 'proposals', 'rail', 'buildings']) {
     checksumFiles.push(`${layer}/tileset.json`, `${layer}/content.glb`);
   }
   const checksums = {};

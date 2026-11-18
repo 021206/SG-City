@@ -58,13 +58,17 @@
   .poi-label.tier2 i { width: 4px; height: 4px; background: #7dd3fc; box-shadow: 0 0 5px #38bdf8; }
   .poi-label.tier2 span { font-size: 10px; color: #bfe6ff; }
 
-  /* day-mode (dark engineering palette) label styling: light text, dark halo */
-  body.day .poi-label { color: #e8f6ff; text-shadow: 0 0 6px rgba(0, 0, 0, 0.95), 0 1px 2px rgba(0, 0, 0, 0.95); }
-  body.day .poi-label i { background: #ffd166; box-shadow: 0 0 8px rgba(255, 176, 32, 0.8); }
-  body.day .poi-label.tier0 { color: #ffffff; }
-  body.day .poi-label.tier0 i { background: #ffd166; box-shadow: 0 0 10px #ffb020; }
-  body.day .poi-label.tier2 span { color: #bfe6ff; text-shadow: 0 0 5px rgba(0, 0, 0, 0.95); }
-  body.day .poi-label.tier2 i { background: #7dd3fc; box-shadow: 0 0 5px #38bdf8; }
+  /* Light navigation-map labels: dark type with a soft white halo. */
+  body.day .poi-label {
+    color: #3f494d;
+    text-shadow: -1px -1px 0 rgba(255,255,255,.96), 1px -1px 0 rgba(255,255,255,.96),
+      -1px 1px 0 rgba(255,255,255,.96), 1px 1px 0 rgba(255,255,255,.96), 0 0 4px #ffffff;
+  }
+  body.day .poi-label i { background: #4a91c9; border: 1px solid #ffffff; box-shadow: 0 1px 3px rgba(40,60,70,.22); }
+  body.day .poi-label.tier0 { color: #263237; }
+  body.day .poi-label.tier0 i { background: #e7a33b; box-shadow: 0 1px 3px rgba(40,60,70,.25); }
+  body.day .poi-label.tier2 span { color: #707b80; text-shadow: 0 0 4px #ffffff; }
+  body.day .poi-label.tier2 i { background: #7aa9c8; box-shadow: none; }
 
   /* ---------- along-road name labels ---------- */
   .road-label {
@@ -86,11 +90,12 @@
   .road-label.tier0 { font-size: 12px; font-weight: 600; color: #cdeee6; }
   .road-label.tier2 { font-size: 10px; color: #8fb8b2; }
   body.day .road-label {
-    color: #dbeafe;
-    text-shadow: 0 0 5px rgba(0, 0, 0, 0.95), 0 1px 2px rgba(0, 0, 0, 0.95);
+    color: #616c70;
+    text-shadow: -1px -1px 0 rgba(255,255,255,.98), 1px -1px 0 rgba(255,255,255,.98),
+      -1px 1px 0 rgba(255,255,255,.98), 1px 1px 0 rgba(255,255,255,.98), 0 0 4px #ffffff;
   }
-  body.day .road-label.tier0 { color: #ffffff; }
-  body.day .road-label.tier2 { color: #a9c4d8; }
+  body.day .road-label.tier0 { color: #3e4a4e; }
+  body.day .road-label.tier2 { color: #7b8589; }
 
   /* ---------- left info panel ---------- */
   #panel {
@@ -142,6 +147,29 @@
     accent-color: #2dd4bf;
     width: 14px;
     height: 14px;
+  }
+  #color-legend {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px 10px;
+    margin-top: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(45, 212, 191, 0.15);
+    font-size: 11px;
+    color: #9fb8b5;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .legend-swatch {
+    width: 14px;
+    height: 9px;
+    flex: 0 0 auto;
+    border: 1px solid rgba(210, 235, 235, 0.30);
+    border-radius: 2px;
   }
   #stats {
     margin-top: 10px;
@@ -296,6 +324,76 @@
     cursor: pointer;
   }
   #road-clear:hover { color: #5eead4; border-color: rgba(45, 212, 191, 0.6); }
+  #data-source {
+    margin-top: 7px;
+    font-size: 10px;
+    line-height: 1.5;
+    color: #587a75;
+  }
+  .legend-swatch.swatch-parcel { background: #171d24; }
+  .legend-swatch.swatch-hill { background: #1d5b32; }
+  .legend-swatch.swatch-water { background: #0b2f67; }
+  .legend-swatch.swatch-road { background: #315779; }
+  .legend-swatch.swatch-building { background: #1b3044; }
+  .legend-swatch.swatch-highlight { background: #ffae32; }
+  .legend-swatch.swatch-proposed { background: repeating-linear-gradient(90deg, #f05209 0 7px, transparent 7px 11px); border-color: #f05209; }
+
+  /* Light AMap-like UI. Night mode keeps the original engineering console. */
+  body.day #panel,
+  body.day #road-panel {
+    background: rgba(255, 255, 255, 0.91);
+    border-color: rgba(62, 85, 82, 0.16);
+    box-shadow: 0 8px 28px rgba(38, 50, 56, 0.13);
+    color: #3d4a4e;
+  }
+  body.day #panel h1,
+  body.day #road-panel h2 { color: #188768; }
+  body.day #status { color: #6d7c80; }
+  body.day #status.ok { color: #188768; }
+  body.day #status.error { color: #c44848; }
+  body.day #layers,
+  body.day #color-legend { border-color: rgba(62, 85, 82, 0.13); }
+  body.day #color-legend { color: #56656a; }
+  body.day #stats { color: #65767a; }
+  body.day #help,
+  body.day #data-source { color: #879397; }
+  body.day #road-panel .rp-sub { color: #75858a; }
+  body.day #search,
+  body.day .ctrl-btn {
+    background: rgba(255, 255, 255, 0.93);
+    border-color: rgba(62, 85, 82, 0.18);
+    color: #3d4a4e;
+    box-shadow: 0 4px 16px rgba(38, 50, 56, 0.10);
+  }
+  body.day #search::placeholder { color: #97a2a5; }
+  body.day #search:focus,
+  body.day .ctrl-btn:hover { border-color: rgba(24, 135, 104, 0.48); }
+  body.day #road-filter {
+    background: #f5f7f6;
+    border-color: #dce3e0;
+    color: #3d4a4e;
+  }
+  body.day .road-row { color: #465458; }
+  body.day .road-row:hover { background: rgba(24, 135, 104, 0.08); }
+  body.day .road-row.active {
+    background: rgba(231, 163, 59, 0.13);
+    border-color: rgba(211, 139, 38, 0.48);
+    color: #a56813;
+  }
+  body.day .road-row .tag { background: #e9f0f5; color: #5d83a0; }
+  body.day .road-row .tag.t0 { background: #f8edda; color: #aa761f; }
+  body.day .road-row .tag.t1 { background: #e3f1eb; color: #348269; }
+  body.day #road-clear {
+    background: #f5f7f6;
+    border-color: #dce3e0;
+    color: #65767a;
+  }
+  body.day #road-clear:hover { color: #188768; border-color: rgba(24, 135, 104, 0.42); }
+  body.day .legend-swatch.swatch-parcel { background: #eeeeea; }
+  body.day .legend-swatch.swatch-hill { background: #b9dfb5; }
+  body.day .legend-swatch.swatch-water { background: #a6d2ec; }
+  body.day .legend-swatch.swatch-road { background: #34424d; border-color: #65737d; }
+  body.day .legend-swatch.swatch-building { background: #d3d9dd; }
 </style>
 </head>
 <body>
@@ -306,8 +404,18 @@
   <h1>新加坡滨海湾 · 离线三维城市</h1>
   <div id="status">正在初始化…</div>
   <div id="layers"></div>
+  <div id="color-legend" aria-label="地图颜色图例">
+    <div class="legend-item"><span class="legend-swatch swatch-parcel"></span>普通地块</div>
+    <div class="legend-item"><span class="legend-swatch swatch-hill"></span>山体 / 坡地</div>
+    <div class="legend-item"><span class="legend-swatch swatch-water"></span>水域</div>
+    <div class="legend-item"><span class="legend-swatch swatch-road"></span>道路</div>
+    <div class="legend-item"><span class="legend-swatch swatch-building"></span>建筑</div>
+    <div class="legend-item"><span class="legend-swatch swatch-highlight"></span>工程高亮</div>
+    <div class="legend-item"><span class="legend-swatch swatch-proposed"></span>方案连接（待核实）</div>
+  </div>
   <div id="stats"></div>
   <div id="help">左键拖拽 旋转 · 右键拖拽 平移 · 滚轮 缩放 · 双击 复位视角</div>
+  <div id="data-source">道路平面：LTA Road Section Line（2026-09，SVY21）<br>补充属性：OpenStreetMap · 地形：Mapzen<br>完整路网显示 · 私人／施工属性需工程判读<br>橙色虚线为方案连接，非现状道路<br>方案比选与空间协调用 · 非测量控制成果</div>
 </div>
 <div id="controls">
   <input id="search" list="search-list" placeholder="搜索地名并飞往…" autocomplete="off">
@@ -317,7 +425,7 @@
 </div>
 <div id="road-panel">
   <h2>已修建道路 · 工程筛选</h2>
-  <div class="rp-sub">点击道路高亮并飞往 · 用于新建道路工程对照</div>
+  <div class="rp-sub">点击道路以单条中心线高亮并飞往 · 用于工程对照</div>
   <input id="road-filter" placeholder="筛选路名 / 编号…" autocomplete="off">
   <div id="road-list"></div>
   <button id="road-clear">清除高亮</button>

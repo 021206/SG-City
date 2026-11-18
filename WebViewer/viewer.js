@@ -10,6 +10,7 @@
     terrain: '地形/地块',
     water: '水面',
     roads: '道路',
+    proposals: '方案连接（待核实）',
     rail: '地铁/轻轨',
     buildings: '建筑',
   };
@@ -20,6 +21,7 @@
     roadSecondary: { emissiveScale: 2.6 },
     roadMinor: { emissiveScale: 2.4 },
     roadCasing: { emissiveScale: 2.0 },
+    roadMajorCasing: { emissiveScale: 2.0 },
     roadMarking: { emissiveScale: 2.2 },
     windowCyan: { emissiveScale: 2.4 },
     windowWarm: { emissiveScale: 2.4 },
@@ -204,8 +206,8 @@
     ambient: [0.55, 0.58, 0.62],
     lightDir: [-0.32, 0.78, -0.5],
     lightColor: [1.05, 1.0, 0.92],
-    fogColor: [0.82, 0.86, 0.88],
-    fogDensity: 0.000025,
+    fogColor: [0.92, 0.93, 0.92],
+    fogDensity: 0.000012,
   };
 
   function lerp(a, b, t) {
@@ -291,8 +293,8 @@
   var DEFAULT_CAM = {
     target: [0, 40, 0],
     yaw: -0.12,
-    pitch: 0.3,
-    dist: 10000,
+    pitch: 1.12,
+    dist: 7000,
   };
   var camera = {
     target: DEFAULT_CAM.target.slice(),
@@ -424,32 +426,32 @@
     return out;
   }
 
-  /* Material presets for the daylight engineering view: matches the reference
-   * night-render palette — bright steel-blue carriageways read as continuous
-   * solid bands against dark, varied green parcels (no "all green" ambiguity,
-   * and dark asphalt no longer blends into the ground at distance). */
+  /* Engineering scheme-comparison palette: dark carriageways stand out from
+   * pale parcels while retaining the light navigation-map base. */
   var DAY_MATERIAL = {
-    roadMajor: { baseColor: [0.115, 0.205, 0.315] },
-    roadSecondary: { baseColor: [0.105, 0.190, 0.295] },
-    roadMinor: { baseColor: [0.095, 0.175, 0.275] },
-    roadTunnel: { baseColor: [0.055, 0.100, 0.165] },
-    roadCasing: { baseColor: [0.185, 0.300, 0.420] },
-    roadMarking: { baseColor: [0.82, 0.84, 0.87] },
-    water: { baseColor: [0.010, 0.045, 0.110] },
-    ground: { baseColor: [0.020, 0.085, 0.036] },
-    groundFlat: { baseColor: [0.008, 0.022, 0.017] },
-    block0: { baseColor: [0.020, 0.090, 0.038] },
-    block1: { baseColor: [0.032, 0.135, 0.052] },
-    block2: { baseColor: [0.048, 0.180, 0.068] },
-    block3: { baseColor: [0.026, 0.110, 0.045] },
-    parcel0: { baseColor: [0.008, 0.020, 0.016] },
-    parcel1: { baseColor: [0.010, 0.026, 0.020] },
-    parcel2: { baseColor: [0.012, 0.032, 0.024] },
-    parcel3: { baseColor: [0.009, 0.023, 0.018] },
-    roof: { baseColor: [0.030, 0.055, 0.100] },
-    facade: { baseColor: [0.055, 0.110, 0.160] },
-    windowCyan: { baseColor: [0.10, 0.22, 0.26] },
-    windowWarm: { baseColor: [0.22, 0.20, 0.15] },
+    roadMajor: { baseColor: [0.055, 0.070, 0.085] },
+    roadSecondary: { baseColor: [0.080, 0.095, 0.110] },
+    roadMinor: { baseColor: [0.120, 0.135, 0.145] },
+    roadTunnel: { baseColor: [0.100, 0.125, 0.155] },
+    roadCasing: { baseColor: [0.28, 0.32, 0.35] },
+    roadMajorCasing: { baseColor: [0.20, 0.25, 0.29] },
+    roadMarking: { baseColor: [0.88, 0.89, 0.84] },
+    roadProposed: { baseColor: [0.95, 0.32, 0.035] },
+    water: { baseColor: [0.28, 0.48, 0.62] },
+    ground: { baseColor: [0.36, 0.55, 0.35] },
+    groundFlat: { baseColor: [0.60, 0.61, 0.59] },
+    block0: { baseColor: [0.36, 0.55, 0.35] },
+    block1: { baseColor: [0.42, 0.61, 0.40] },
+    block2: { baseColor: [0.47, 0.65, 0.44] },
+    block3: { baseColor: [0.39, 0.58, 0.37] },
+    parcel0: { baseColor: [0.62, 0.63, 0.60] },
+    parcel1: { baseColor: [0.65, 0.66, 0.63] },
+    parcel2: { baseColor: [0.67, 0.68, 0.65] },
+    parcel3: { baseColor: [0.63, 0.64, 0.61] },
+    roof: { baseColor: [0.50, 0.53, 0.55] },
+    facade: { baseColor: [0.48, 0.51, 0.53] },
+    windowCyan: { baseColor: [0.52, 0.55, 0.57] },
+    windowWarm: { baseColor: [0.52, 0.55, 0.57] },
   };
 
   function tuneDayMaterial(m) {
@@ -637,8 +639,9 @@
                    road.roadClass === 'roadSecondary' ? 1 : 2;
         var fontSize = tier === 0 ? 12 : tier === 1 ? 11 : 10;
         var hw = textWidthPx(road.name, fontSize) / 2 + 5;
-        var entry = { name: road.name, roadClass: road.roadClass, ref: road.ref || '', tier: tier, lines: [] };
+        var entry = { name: road.name, roadClass: road.roadClass, ref: road.ref || '', tier: tier, lines: [], highlightLines: [] };
         var minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+        var bestLine = null, bestLength = -1;
         road.lines.forEach(function (line) {
           var pts = line.map(function (c) { return toLocal(c[0], c[1]); });
           entry.lines.push(pts);
@@ -651,6 +654,7 @@
             cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
           }
           var total = cum[cum.length - 1];
+          if (total > bestLength) { bestLength = total; bestLine = pts; }
           if (total < 60) return;
           var count = Math.min(MAX_PER_LINE[tier], Math.max(1, Math.floor(total / SPACING[tier])));
           for (var k = 0; k < count; k++) {
@@ -675,6 +679,7 @@
             roadLabels.push({ name: road.name, tier: tier, x: ax, z: az, dx: dx / dl, dz: dz / dl, hw: hw, el: el });
           }
         });
+        if (bestLine) entry.highlightLines = [bestLine];
         if (entry.lines.length) {
           entry.cx = (minX + maxX) / 2;
           entry.cz = (minZ + maxZ) / 2;
@@ -727,13 +732,13 @@
     roadPanelEl._rerender = function () { render(roadFilterEl.value); };
   }
 
-  function selectRoad(name) {
+  function selectRoad(name, preserveCamera) {
     var entry = roadIndex[name];
     if (!entry) return;
     selectedRoad = entry;
     selectedPlace = null;
     var dist = Math.min(6000, Math.max(420, entry.extent * 1.15));
-    flyTo([entry.cx, 40, entry.cz], dist, 1.4);
+    if (!preserveCamera) flyTo([entry.cx, 40, entry.cz], dist, 1.4);
     statusEl.textContent = '高亮道路: ' + name + (entry.ref ? ' · ' + entry.ref : '');
     statusEl.classList.remove('error');
     if (roadPanelEl._rerender) roadPanelEl._rerender();
@@ -802,7 +807,7 @@
       for (var pass = 0; pass < 2; pass++) {
         hlCtx.strokeStyle = pass === 0 ? 'rgba(255,154,60,0.28)' : 'rgba(255,176,32,0.95)';
         hlCtx.lineWidth = pass === 0 ? core * 2.8 : core;
-        selectedRoad.lines.forEach(function (line) {
+        selectedRoad.highlightLines.forEach(function (line) {
           hlCtx.beginPath();
           var started = false;
           for (var i = 0; i < line.length; i++) {
@@ -1218,8 +1223,9 @@
 
   window.addEventListener('resize', resize);
 
-  /* Shareable viewpoint: #cam=x,z,dist (local metres) for engineering links. */
-  var camMatch = /^#cam=(-?[\d.]+),(-?[\d.]+),([\d.]+)$/.exec(window.location.hash);
+  /* Shareable engineering view: #cam=x,z,dist&road=Road%20Name.
+     When both are present, keep the requested camera and only add the highlight. */
+  var camMatch = /(?:^#|&)cam=(-?[\d.]+),(-?[\d.]+),([\d.]+)(?:&|$)/.exec(window.location.hash);
   if (camMatch) {
     camera.target = [parseFloat(camMatch[1]), 40, parseFloat(camMatch[2])];
     camera.dist = Math.min(20000, Math.max(120, parseFloat(camMatch[3])));
@@ -1249,7 +1255,7 @@
         buildStreetLamps();
         buildGroundSampler();
         var roadMatch = /[#&]road=([^&]+)/.exec(window.location.hash);
-        if (roadMatch) selectRoad(decodeURIComponent(roadMatch[1]));
+        if (roadMatch) selectRoad(decodeURIComponent(roadMatch[1]), Boolean(camMatch));
       });
     })
     .then(function () {

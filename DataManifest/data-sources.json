@@ -2,6 +2,17 @@
   "snapshotDate": "2026-11-02",
   "sources": [
     {
+      "id": "lta-road-section-line",
+      "purpose": "Official horizontal road geometry for scheme comparison and spatial coordination",
+      "datasetDate": "Sep 2026",
+      "url": "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/RoadSectionLine_Sep2026.zip",
+      "sourceCrs": "EPSG:3414 SVY21",
+      "outputCrs": "EPSG:4326",
+      "license": "Singapore Open Data Licence",
+      "attribution": "Land Transport Authority (LTA), Road Section Line, Sep 2026",
+      "licenseUrl": "https://data.gov.sg/open-data-licence"
+    },
+    {
       "id": "osm-overpass",
       "purpose": "Marina Bay buildings, roads, water and points of interest",
       "url": "https://overpass-api.de/api/interpreter",
@@ -19,8 +30,13 @@
     }
   ],
   "limitations": [
-    "P0 building heights are estimated when OSM height and building:levels are absent.",
-    "P0 terrain is display-grade and must not be used for surveying or navigation.",
+    "The combined map supports scheme comparison and spatial coordination; it is not survey-controlled and must not be used for setting out, construction or acceptance.",
+    "LTA Road Section Line supplies horizontal geometry. Road names, widths and bridge/tunnel attributes are supplemented from nearest-match OSM records and are not surveyed attributes.",
+    "The complete road network is shown to preserve connectivity; private and construction attributes require engineering interpretation.",
+    "The Rhu Cross A-B dashed orange connector is a user-approved scheme placeholder without LTA kerb evidence, not an existing road or surveyed alignment.",
+    "P0 building heights are estimated when OSM height and building:levels are absent and are scaled for display.",
+    "P0 terrain and bridge elevations are display-grade and must not be used for engineering elevation analysis.",
+    "Generated land blocks are visual faces, not cadastral parcels.",
     "Building relations and complex shoreline relations require full-city pipeline hardening."
   ]
 }
